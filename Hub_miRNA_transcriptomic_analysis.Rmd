@@ -1,0 +1,718 @@
+---
+title: "miRNA seq validation"
+output:
+  pdf_document:
+    toc: yes
+  html_notebook:
+    code_folding: hide
+    toc: yes
+  html_document:
+    code_folding: hide
+    df_print: paged
+    number_section: yes
+    theme: paper
+    toc: yes
+    toc_float:
+      collapsed: no
+---    
+
+# Experiment design:
+  From miR-seq anlysis, we observed that the hsa-miR-155-5p, hsa-miR-186-5p and hsa-miR-125a-3p were upregulated in M1 macrophages and there target genes were downregulated in LPS+Ifg treated RNA-seq samples. Target downregulated genes were also involved different immune related function.
+  To validate the effect of miRNAs on target genes, we have overexpressed the above 3 miRNAs in unstimulated macrophages having 6 doners for each miRNAs. 
+  
+# Comparision:
+  effect of overexpressed miRNAs compared to negative control.
+
+# Preprocessing:
+  The sampes were trimmed by cutadapt and alignment using Salmon.
+  Average mapping percentage: 91%
+
+# sample matrix
+  
+```{r}
+library(tximportData)
+library(readr)
+library(tximport)
+library (rjson)
+library (limma)
+library (edgeR)
+library (gplots)
+library(GenomicFeatures)
+TxDb <- makeTxDbFromGFF(file ="Z:/Shared/Chiara_shared/Kajus_RNA_seq/quantification.dir/geneset_all.gtf")
+
+k <- keys(TxDb, keytype = "TXNAME")
+tx2gene <- AnnotationDbi::select(TxDb, k, "GENEID", "TXNAME")
+```
+
+```{r}
+library(tximport)
+workingdir = "Z:/Shared/Overexpressed_miRNAs_RNA_seq/quantification/"
+file = list.files(path =workingdir, pattern=".sf$")
+Files=unlist(file)
+name = gsub("trimmed-|.sf", "",Files)
+names(Files) <- name
+txi <- tximport(paste0(workingdir,Files), type = "salmon", tx2gene = tx2gene,countsFromAbundance = "lengthScaledTPM")
+#txi1 <- tximport(paste0(workingdir,Files), type = "salmon", txOut = TRUE)
+mirnas_oe = txi$counts
+df_tmp = txi1$abundance
+colnames(mirnas_oe) = name
+```
+
+```{r}
+remove_zero = mirnas_oe[rowSums(mirnas_oe)>0, ] 
+
+count = DGEList (count = remove_zero) ##
+TMM_count = calcNormFactors(count, method = "TMM")
+
+CPM_Count = cpm(TMM_count, normalized.lib.sizes=TRUE, log=T)
+#CPM_186 = CPM_Count[,grepl("c|d1d|d2d|d3d|d4d|d5d|d6d",colnames(CPM_Count))]
+#ENST00000464213_OE = CPM_186[grep("ENST00000464213",rownames(CPM_186)),]
+#names(ENST00000464213_OE) = Groupings$Group
+#split = split (t(ENST00000464213_OE),names(ENST00000464213_OE))
+#strip_new = stack(split)
+#boxplot (values~ind,strip_new)
+
+```
+# PCA visulization
+```{r}
+Grouping = read.csv("z:/Shared/Overexpressed_miRNAs_RNA_seq/quantification/grouping.csv", header = T)
+
+#Groupings = Grouping[grepl("c|d1d|d2d|d3d|d4d|d5d|d6d",Grouping$Samples),]
+library(factoextra)
+pca_data = t(CPM_Count)
+wdbc.pr <- prcomp(pca_data, center = TRUE, scale = TRUE)
+
+fviz_pca_ind(wdbc.pr, geom.ind = "point", pointshape = 21, 
+             pointsize = 2, 
+             fill.ind = Grouping$Group, 
+             col.ind = "black", 
+             palette = "jco", 
+             addEllipses = FALSE,
+             label = "var",
+             col.var = "black",
+             repel = TRUE,
+             legend.title = "Conditions") +
+  ggtitle("2d PCA miRNA data on CPM counts") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+```{r}
+Grouping = read.csv("z:/Shared/Overexpressed_miRNAs_RNA_seq/quantification/grouping.csv", header = T)
+
+#Grouping1 = Grouping[grep("d1c|d2c|d3c|d4c|d5c|d6c|d1d|d2d|d3d|d4d|d5d|d6d",Grouping$Samples),]
+#Grouping2 = Grouping[grep("d1b|d2b|d3b|d4b|d5b|d6b|d1d|d2d|d3d|d4d|d5d|d6d",Grouping$Samples),]
+
+
+
+CPM_Count = cpm(TMM_count, normalized.lib.sizes=TRUE, log=T, prior.count=1)
+
+#CPm_count_d1a = CPM_Count[,grep("d1c|d2c|d3c|d4c|d5c|d6c|d1d|d2d|d3d|d4d|d5d|d6d",colnames(CPM_Count))]
+
+#CPm_count_d1b = CPM_Count[,grep("d1b|d2b|d3b|d4b|d5b|d6b|d1d|d2d|d3d|d4d|d5d|d6d",colnames(CPM_Count))]
+
+pca_data = t(CPM_Count)
+wdbc.pr <- prcomp(pca_data, center = TRUE, scale = TRUE)
+
+tiff('z:/Shared/miRNAs_seq_figures/PCA_155.png', units="in", width=6, height=4, res=600)
+
+fviz_pca_ind(wdbc.pr, geom.ind = "point", pointshape = 21, 
+             pointsize = 2, 
+             fill.ind = Grouping2$Group, 
+             col.ind = "black", 
+             palette = "jco", 
+             addEllipses = FALSE,
+             label = "var",
+             col.var = "black",
+             repel = TRUE,
+             legend.title = "Conditions") +
+  ggtitle("2d PCA miRNA data on CPM counts") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+dev.off()
+
+```
+
+```{r}
+library (DESeq2)
+library(tximport)
+library(ggplot2)
+library(dplyr)
+dds <- DESeqDataSetFromTximport(txi, colData=Grouping, design=~donors + Group)
+rlog_data <- rlog(dds)
+rv <- rowVars(assay(rlog_data))
+select <- order(rv, decreasing = TRUE)[seq_len(1000)]
+pca <- prcomp(t(CPM_Count))
+th <- theme_gray(base_size=9) + theme(legend.position = "none")
+data.frame(PC = factor(colnames(pca$rotation), levels = colnames(pca$rotation)), var = pca$sdev^2/sum(pca$sdev^2)) %>%
+  ggplot() + aes(x=PC, y=var) + 
+  geom_bar(stat="identity") +
+  scale_y_continuous(labels = scales::percent, limits=c(0,1), name="% variance explained") + th -> waterfall
+suppressMessages(library(patchwork))
+pc12 <- ggplot(as.data.frame(pca$x)) + aes(x = PC1, y=PC2, col = Grouping$donors, shape=Grouping$Group)  + geom_point(size=3) + geom_line(aes(group=Grouping$donors )) + th 
+pc12 = pc12 + theme_minimal(base_size=9)
+pc12 = pc12 + theme(
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "transparent",colour = NA),
+        plot.background = element_rect(fill = "transparent",colour = NA))
+        
+pc23 <- ggplot(as.data.frame(pca$x)) + aes(x = PC2, y=PC3, col = Grouping$donors, shape=Grouping$Group) + geom_point(size=3) + geom_line(aes(group=Grouping$donors))+ th
+pc13 <- ggplot(as.data.frame(pca$x)) + aes(x = PC1, y=PC3, col = Grouping$donors, shape=Grouping$Group) + geom_point(size=3) + geom_line(aes(group=Grouping$donors))+ th
+
+pc24 <- ggplot(as.data.frame(pca$x)) + aes(x = PC2, y=PC4, col = Grouping$donors, shape=Grouping$Group) + geom_point(size=3) + theme_gray(base_size=9)
+#waterfall + {pc12+pc13} + plot_layout(ncol=1, heights=c(1,3))
+
+tiff('z:/Shared/miRNAs_seq_figures/PCA_miRNAs.tiff', units="in", width=5, height=3.5, res=600)
+pc12
+dev.off()
+
+tiff('z:/Shared/miRNAs_seq_figures/PCA_miRNAs_varations.tiff', units="in", width=6, height=4, res=600)
+waterfall
+dev.off()
+```
+
+
+We can see very clearly that the first principle component seperates the donars irrespective of miRNAs transfection. 
+
+What we understand from this:
+
+Effect of donar is dominant than the effect of miRNAs transfection.
+
+Therefore, we need to remove the effect of donars to see the effect of miRNAs transfection on genes.  
+
+# Differential expression analysis
+```{r}
+Donars <- factor(Grouping$donors)
+Transfection <- factor(Grouping$Group, levels=c("Negative_ctrl","miR125a","miR155","miR186"))
+design <- model.matrix(~Donars+Transfection)
+dge=calcNormFactors(count)
+v=voom(dge,design,plot=TRUE,normalize.method="quantile")
+fit <- lmFit(v, design)
+fit <- eBayes(fit)
+miR55 = topTable(fit, coef="TransfectionmiR155",adjust = "BH", nrow(v))
+topTable(fit, coef="TransfectionmiR155",adjust = "BH")
+tiff("d:/dataset/new_plot_mirna/RNA_seq_feb/miR55_volano.png" , width = 3.5, height = 3.5, units = 'in', res = 600)
+p = with(miR55, plot(logFC, -log10(adj.P.Val), pch=20, main="Volcano plot"))
+with(subset(miR55, adj.P.Val<.05 & abs(logFC)>0), points(logFC, -log10(adj.P.Val), pch=20, col="green"))
+abline(h=-log10(0.05),lty=1,col="RED")
+#abline(v=c(-1,1),lty=1,col="blue")
+abline(v=0,lty=3,col="black")
+dev.off()
+
+```
+
+   
+
+```{r}
+miR186 = topTable(fit, coef="TransfectionmiR186",adjust = "BH", nrow(v))
+topTable(fit, coef="TransfectionmiR186")
+
+tiff("d:/dataset/new_plot_mirna/RNA_seq_feb/miR186_volano.png" , width = 3.5, height = 3.5, units = 'in', res = 600)
+p = with(miR186, plot(logFC, -log10(adj.P.Val), pch=20, main="Volcano plot"),xlim=c(min (miR186$logFC),max(miR186$logFC)))
+with(subset(miR186, adj.P.Val<.05 & abs(logFC)>0), points(logFC, -log10(adj.P.Val), pch=20, col="green"))
+
+abline(h=-log10(0.05),lty=1,col="RED")
+#abline(v=c(-1,1),lty=1,col="blue")
+abline(v=0,lty=3,col="black")
+dev.off()
+```
+
+```{r}
+
+miR125a = topTable(fit, coef="TransfectionmiR125a",adjust = "BH", nrow(v))
+topTable(fit, coef="TransfectionmiR125a")
+
+tiff("d:/dataset/new_plot_mirna/RNA_seq_feb/mir125a_volano.png" , width = 3.5, height = 3.5, units = 'in', res = 600)
+p = with(miR125a, plot(logFC, -log10(adj.P.Val), pch=20, main="Volcano plot"),xlim=c(min (miR125a),max(miR125a)))
+with(subset(miR125a, adj.P.Val<.05 & abs(logFC)>0), points(logFC, -log10(adj.P.Val), pch=20, col="green"))
+abline(h=-log10(0.05),lty=1,col="RED")
+#abline(v=c(-1,1),lty=1,col="blue")
+abline(v=0,lty=3,col="black")
+dev.off()
+```
+
+```{r}
+up_regS_miRnas = read.csv ("C:/Users/Sumeet/Documents/upres_miRnas.csv", header = T)
+miR125a_targeted_down = miR125a[miR125a$logFC<0,]
+miR125a_targeted = miR125a_targeted_down[rownames(miR125a_targeted_down)%in%up_regS_miRnas$hsa.miR.125a.3p,]
+
+miR125a_trgeted_all = miR125a[rownames(miR125a)%in%up_regS_miRnas$hsa.miR.125a.3p,]
+miR125a_nt_trgeted_all = miR125a[!rownames(miR125a)%in%rownames(miR125a_trgeted_all),]
+
+
+up_regS_miRnas_trget = miR125a_targeted_down[rownames(miR125a_targeted_down)%in%up_regS_miRnas$hsa.miR.125a.3p,]
+
+
+miR155_targeted_downs = miR55[miR55$logFC<0,]
+miR155_targeted = miR155_targeted_downs[rownames(miR155_targeted_downs)%in%up_regS_miRnas$hsa.miR.155.5p,]
+miR155_targeted_nt = miR155_targeted_downs[!rownames(miR155_targeted_downs)%in%rownames(miR155_targeted),]
+
+miR155_trgeted_all = miR55[rownames(miR55)%in%up_regS_miRnas$hsa.miR.155.5p,]
+miR155_nt_trgeted_all = miR55[!rownames(miR55)%in%rownames(miR155_trgeted_all),]
+
+miR186_targetted_down = miR186[miR186$logFC<0,]
+miR186_targetted = miR186_targetted_down[rownames(miR186_targetted_down)%in%up_regS_miRnas$hsa.miR.186.5p,]
+miR186_targetted_nt = miR186_targetted_down[!rownames(miR186_targetted_down)%in%up_regS_miRnas$hsa.miR.186.5p,]
+
+miR186_trgeted_all = miR186[rownames(miR186)%in%up_regS_miRnas$hsa.miR.186.5p,]
+miR186_nt_trgeted_all = miR186[!rownames(miR186)%in%rownames(miR186_trgeted_all),]
+
+Genes_target = Reduce(intersect, list(rownames(miR186_trgeted_all),rownames(miR125a_trgeted_all),rownames(miR155_trgeted_all)))
+
+```
+
+#wilcox test miR125a
+
+```{r}
+miR_125a_wc_test = wilcox.test(as.matrix(miR125a_targeted$logFC),as.matrix(miR125a_nt_trgeted_all$logFC), alternative = "two.sided", conf.int = TRUE, estimate=TRUE)
+
+miR_125a_WC_all = wilcox.test(as.matrix(miR125a_trgeted_all$logFC,miR125a_nt_trgeted_all$logFC,alternative = "two.sided", conf.int = TRUE, estimate=TRUE))
+
+#miR_125a_t_test = t.test(as.matrix(miR125a_targeted$logFC),as.matrix(miR125a_nt_trgeted$logFC))
+
+miR125a_targeted_fc = miR125a_trgeted_all$logFC
+miR125a_nt_targeted_fc = miR125a_nt_trgeted_all$logFC
+overlap_genes_target =  miR125a[rownames(miR125a)%in%Genes_target,]
+overlap_genes_target = overlap_genes_target$logFC
+
+group <- c(rep("miR-125-Targeted", length(miR125a_targeted_fc)), rep("mir125-Not_targeted", length(miR125a_nt_targeted_fc)),c(rep("overlap_target_genes_125", length(overlap_genes_target))))
+
+dat_mir125 <- data.frame(Foldchange = c(miR125a_targeted_fc,miR125a_nt_targeted_fc,overlap_genes_target), group = group)
+
+cdtrg <- ecdf(miR125a_targeted_fc) 
+cdnttrg = ecdf(miR125a_nt_targeted_fc)
+
+
+ggsave ("z:/Shared/miRNAs_seq_figures/mir125_ecdf_all.png",dpi = 600,width =4.5, height = 3.5, units = "in")
+
+ggplot(dat_mir125, aes(x = Foldchange, group = group, color = group))+
+  stat_ecdf(size=0.5) +
+    theme_bw(base_size = 10) +
+    theme(legend.position ="top") +
+    xlab("Fold change") +
+    ylab("ECDF") +
+    #geom_line(size=1) +
+    theme(legend.title=element_blank())
+
+
+```
+# WILCOX test for mir186
+```{r}
+miR_186a_wc_test = wilcox.test(as.matrix(miR186_targetted$logFC),as.matrix(miR186_targetted_nt$logFC), alternative = "two.sided", conf.int = TRUE, estimate=TRUE)
+
+
+miR186_targeted_fc = miR186_trgeted_all$logFC
+miR186_nt_targeted_fc = miR186_nt_trgeted_all$logFC
+
+overlap_genes_target =  miR186[rownames(miR186)%in%Genes_target,]
+overlap_genes_target = overlap_genes_target$logFC
+
+group <- c(rep("miR-186-Targeted", length(miR186_targeted_fc)), rep("mir186-Not_targeted", length(miR186_nt_targeted_fc)),c(rep("overlap_target_genes_186", length(overlap_genes_target))))
+
+
+
+dat_mir186 <- data.frame(Foldchange = c(miR186_targeted_fc,miR186_nt_targeted_fc,overlap_genes_target), group = group)
+
+
+
+ggsave ("z:/Shared/miRNAs_seq_figures/mir186_ecdf_all.png",dpi = 600,width =4.5, height = 3.5, units = "in")
+
+ggplot(dat_mir186, aes(x = Foldchange, group = group, color = group))+
+  stat_ecdf(size=0.5) +
+    theme_bw(base_size = 10) +
+    theme(legend.position ="top") +
+    xlab("Fold change") +
+    ylab("ECDF") +
+    #geom_line(size=1) +
+    theme(legend.title=element_blank())
+
+
+```
+
+
+# wilcox test for miR155~
+```{r}
+miR_155_wc_test = wilcox.test(as.matrix(miR155_targeted$logFC),as.matrix(miR155_targeted_nt$logFC), alternative = "two.sided", conf.int = TRUE, estimate=TRUE)
+
+
+miR155_targeted_fc = miR155_trgeted_all$logFC
+miR155_nt_targeted_fc = miR155_nt_trgeted_all$logFC
+
+overlap_genes_target =  miR55[rownames(miR55)%in%Genes_target,]
+overlap_genes_target = overlap_genes_target$logFC
+
+
+group <- c(rep("miR-155-Targeted", length(miR155_targeted_fc)), rep("miR155-Not_targeted", length(miR155_nt_targeted_fc)),rep ("overlap_target_genes_155",length(overlap_genes_target)))
+
+dat_mir155 <- data.frame(Foldchange = c(miR155_targeted_fc,miR155_nt_targeted_fc,overlap_genes_target), group = group)
+
+cdtrg <- ecdf(miR155_targeted_fc) 
+cdnttrg = ecdf(miR155_nt_targeted_fc)
+
+
+  ggsave ("z:/Shared/miRNAs_seq_figures/mir155_ecdf_all.png",dpi = 600,width =5, height = 3.5, units = "in")
+  ggplot(dat_mir155, aes(x = Foldchange, group = group, color = group))+
+    stat_ecdf(size=.5) +
+      theme_bw(base_size = 10) +
+      theme(legend.position ="top") +
+      xlab("Fold Change") +
+      ylab("ECDF") +
+      #geom_line(size=1) +
+      theme(legend.title=element_blank())
+  
+
+
+
+```
+
+#Plot Wilcox test
+
+```{r}
+library (ggpubr)
+dat_mir125$miRNAs  = "miR125"
+dat_mir155$miRNAs  = "miR155"
+dat_mir186$miRNAs  = "miR186"
+
+all_fc = rbind (dat_mir125,dat_mir155,dat_mir186)
+all_fc1 = all_fc[!grepl("overlap_",all_fc$group),]
+
+
+my_comparisons <- list( c("miR-125-Targeted", "mir125-Not_targeted"), 
+                        c("miR-155-Targeted", "miR155-Not_targeted"),
+                        c("miR-186-Targeted", "mir186-Not_targeted"))
+
+
+ 
+  
+  
+   p = ggplot(all_fc1, aes(x=miRNAs, y=Foldchange,fill =group)) +
+    geom_violin(trim=TRUE, fill ='white', color="black",position = "dodge")+
+    geom_boxplot(width=0.1,outlier.size=0.1,color = "black",outlier.colour = "red") + theme_minimal() +   coord_cartesian(ylim=c(-1,1))
+    #p=  p+ stat_compare_means(comparisons = my_comparisons,paired = FALSE,method = "wilcox.test",alternative = "two.sided", conf.int = TRUE, estimate=TRUE)
+
+    ggsave ("z:/Shared/miRNAs_seq_figures/wilcox_test_all.png",dpi = 600,width =6, height = 5, units = "in")
+
+
+```
+
+```{r}
+miR125a_targeted_fc = miR125a_targeted$logFC
+miR125a_nt_targeted_fc = miR125a_nt_trgeted$logFC
+
+group <- c(rep("miR-125-Targeted", length(miR125a_targeted_fc)), rep("mir125-Not_targeted", length(miR125a_nt_targeted_fc)))
+
+dat_mir125 <- data.frame(Foldchange = c(miR125a_targeted_fc,miR125a_nt_targeted_fc), group = group)
+
+miR186_targeted_fc = miR186_targetted$logFC
+miR186_nt_targeted_fc = miR186_targetted_nt$logFC
+
+group <- c(rep("miR-186-Targeted", length(miR186_targeted_fc)), rep("mir186-Not_targeted", length(miR186_nt_targeted_fc)))
+
+dat_mir186 <- data.frame(Foldchange = c(miR186_targeted_fc,miR186_nt_targeted_fc), group = group)
+
+miR155_targeted_fc = miR155_targeted$logFC
+miR155_nt_targeted_fc = miR155_targeted_nt$logFC
+
+group <- c(rep("miR-155-Targeted", length(miR155_targeted_fc)), rep("mir155-Not_targeted", length(miR155_nt_targeted_fc)))
+
+dat_mir155 <- data.frame(Foldchange = c(miR155_targeted_fc,miR155_nt_targeted_fc), group = group)
+
+LPS_overlap_FC = rbind (dat_mir125,dat_mir186,dat_mir155)
+
+
+
+my_comparisons <- list( c("miR-125-Targeted", "mir125-Not_targeted"), 
+                        c("miR-186-Targeted", "mir186-Not_targeted"),
+                        c("miR-155-Targeted", "mir155-Not_targeted"))
+
+
+
+
+ p = ggplot(LPS_overlap_FC, aes(x=group, y=Foldchange,fill =group )) +
+  geom_violin(trim=FALSE, fill = "white", color="black")+
+  geom_boxplot(width=0.08,outlier.size = 0.1) + theme(panel.background = element_blank()) 
+  #p=  p+ stat_compare_means(comparisons = my_comparisons,paired = FALSE)
+p +coord_cartesian(ylim=c(-1,1)) 
+ggsave ("z:/Shared/miRNAs_seq_figures/box_plot_downregs_genes.png",dpi = 600,width = 5.5, height = 4, units = "in")
+
+```
+# Fischer test 
+
+```{r}
+upregs_mi186 = miR186[miR186$logFC > 0,]
+write.csv(upregs_mi186,"z:/Shared/miRNA_results/upregs_mir186.csv")
+
+downregs_mir186 = miR186[miR186$logFC < 0,]
+write.csv(downregs_mir186,"z:/Shared/miRNA_results/downregs_mir186.csv")
+
+
+
+targts_upregs_186 = upregs_mi186[rownames(upregs_mi186)%in%up_regS_miRnas$hsa.miR.186.5p,]
+targts_downregs_186 = downregs_mir186[rownames(downregs_mir186)%in%up_regS_miRnas$hsa.miR.186.5p,]
+
+table_fischer_mir186 = data.frame ("Target" =c(326,413),"Not_target" = c(17489,15066))
+rownames(table_fischer_mir186) = c("Up","Down")
+
+fishcer_test_mir186 = fisher.test(table_fischer_mir186,alternative = "two.sided",conf.level = 0.95)
+
+
+upregs_mi125 = miR125a[miR125a$logFC > 0,]
+write.csv(upregs_mi125,"z:/Shared/miRNA_results/upregs_mi125.csv")
+
+
+
+downregs_mir125 = miR125a[miR125a$logFC < 0,]
+write.csv(downregs_mir125,"z:/Shared/miRNA_results/downregs_mir125.csv")
+
+
+targts_upregs_125 = upregs_mi125[rownames(upregs_mi125)%in%up_regS_miRnas$hsa.miR.125a.3p,]
+targts_downregs_125 = downregs_mir125[rownames(downregs_mir125)%in%up_regS_miRnas$hsa.miR.125a.3p,]
+
+table_fischer_mir125 = data.frame ("Target" =c(238,317),"Not_target" = c(13588,19148))
+rownames(table_fischer_mir125) = c("Up","Down")
+
+fishcer_test_mir125 = fisher.test(table_fischer_mir125,alternative = "two.sided",conf.level = 0.95)
+
+
+upregs_mi155 = miR55[miR55$logFC > 0,]
+write.csv(upregs_mi155,"z:/Shared/miRNA_results/upregs_mi155.csv")
+          
+
+downregs_mir155 = miR55[miR55$logFC < 0,]
+write.csv(downregs_mir155,"z:/Shared/miRNA_results/downregs_mir155.csv")
+
+
+targts_upregs_155 = upregs_mi155[rownames(upregs_mi155)%in%up_regS_miRnas$hsa.miR.155.5p,]
+targts_downregs_155 = downregs_mir155[rownames(downregs_mir155)%in%up_regS_miRnas$hsa.miR.155.5p,]
+
+table_fischer_mir155 = data.frame ("Target" =c(81,281),"Not_target" = c(17396,17115))
+rownames(table_fischer_mir125) = c("Up","Down")
+
+fishcer_test_mir155= fisher.test(table_fischer_mir155,alternative = "two.sided",conf.level = 0.95)
+
+```
+
+
+
+```{r}
+normalized_data = v$E
+mir125a_normalized = as.data.frame(normalized_data[,grep("a",colnames(normalized_data))])
+mir155a_normalized = as.data.frame(normalized_data[,grep("b",colnames(normalized_data))])
+mir186_normalized = as.data.frame(normalized_data[,grep("c",colnames(normalized_data))])
+
+negative_control = as.data.frame(normalized_data[,grepl("d1d|d2d|d3d|d4d|d5d|d6d",
+                                                        colnames(normalized_data))])
+mi125_fc = as.data.frame(rownames(mir125a_normalized))
+rownames(mi125_fc) = mi125_fc$`rownames(mir125a_normalized)`
+mi125_fc$`rownames(mir125a_normalized)` = NULL 
+mi125_fc$mir125_d1 = (mir125a_normalized$d1a-negative_control$d1d)
+mi125_fc$mir125_d2 = (mir125a_normalized$d2a-negative_control$d2d)
+mi125_fc$mir125_d3 = (mir125a_normalized$d3a-negative_control$d3d)
+mi125_fc$mir125_d4 = (mir125a_normalized$d4a-negative_control$d4d)
+mi125_fc$mir125_d5 = (mir125a_normalized$d5a-negative_control$d5d)
+mi125_fc$mir125_d6 = (mir125a_normalized$d6a-negative_control$d6d)
+
+mi125_fc$mir155_d1 = (mir155a_normalized$d1b-negative_control$d1d)
+mi125_fc$mir155_d2 = (mir155a_normalized$d2b-negative_control$d2d)
+mi125_fc$mir155_d3 = (mir155a_normalized$d3b-negative_control$d3d)
+mi125_fc$mir155_d4 = (mir155a_normalized$d4b-negative_control$d4d)
+mi125_fc$mir155_d5 = (mir155a_normalized$d5b-negative_control$d5d)
+mi125_fc$mir155_d6 = (mir155a_normalized$d6b-negative_control$d6d)
+
+mi125_fc$mir186_d1 = (mir186_normalized$d1c-negative_control$d1d)
+mi125_fc$mir186_d2 = (mir186_normalized$d2c-negative_control$d2d)
+mi125_fc$mir186_d3 = (mir186_normalized$d3c-negative_control$d3d)
+mi125_fc$mir186_d4 = (mir186_normalized$d4c-negative_control$d4d)
+mi125_fc$mir186_d5 = (mir186_normalized$d5c-negative_control$d5d)
+mi125_fc$mir186_d6 = (mir186_normalized$d6c-negative_control$d6d)
+
+All_targets = read.csv("z:/Shared/mirna_files/ALL_targts.csv")
+All_targets = All_targets[!duplicated(All_targets$All_targts),]
+
+mi125_fc1 = mi125_fc[rownames(mi125_fc)%in%All_targets,]
+
+GroupColors=as.character(colnames(mi125_fc1))
+GroupColors=gsub("mir125_d1|mir155_d1|mir186_d1","Blue",GroupColors)
+GroupColors=gsub("mir125_d2|mir155_d2|mir186_d2","Red",GroupColors)
+GroupColors=gsub("mir125_d3|mir155_d3|mir186_d3","Green",GroupColors)
+GroupColors=gsub("mir125_d4|mir155_d4|mir186_d4","yellow",GroupColors)
+GroupColors=gsub("mir125_d5|mir155_d5|mir186_d5","orange",GroupColors)
+GroupColors=gsub("mir125_d6|mir155_d6|mir186_d6","cyan3",GroupColors)
+
+
+tiff('z:/Shared/miRNAs_seq_figures/Heamtap_All_FC.png', units="in", width=4, height=4, res=600)
+
+my_palette <- colorRampPalette(c("blue", "white","Red"))
+#heatmap.2 (as.matrix(mi125_fc),trace="none",cexCol = 1,ColSideColors=GroupColors, col = my_palette,
+#            dendrogram="column", key = T, key.xlab="Relative expression", scale="row",margins = c(2,20), lhei = c(2,6),  key.title = NA,  density.info = "none",cexRow=0.8)
+
+h2 = Heatmap(mi125_fc,border = TRUE,cluster_columns = TRUE,show_column_dend = TRUE,cluster_rows = FALSE,row_dend_reorder = TRUE,show_row_names = FALSE)
+h2
+dev.off()
+
+tiff('z:/Shared/miRNAs_seq_figures/Heamtap_genes_trgted_FC.png', units="in", width=6, height=6, res=600)
+
+h1 = Heatmap(mi125_fc1,border = TRUE,cluster_columns = TRUE,show_column_dend = TRUE,cluster_rows = FALSE,row_dend_reorder = TRUE,show_row_names = FALSE)
+
+h1
+
+dev.off()
+
+
+
+```
+
+```{r}
+All_trgts_miR_155_5p = Up_regulated_miRNAs[grep("hsa-miR-155-5p",Up_regulated_miRNAs$Representative.miRNA),]
+
+All_signif_targts_miR_155_5p = signif_ign[signif_ign$ensembl_transcript_id%in%All_trgts_miR_155_5p$Transcript.ID,]
+All_signi_mirna_Seq_155 = miR55[rownames(miR55)%in%All_signif_targts_miR_155_5p$Row.names,]
+down_mirna_seq_155 = All_signi_mirna_Seq_155[All_signi_mirna_Seq_155$logFC<0,]
+down_mirnas_155_lps = merge (signif_ign,down_mirna_seq_155,by.x ="Row.names",by.y = "row.names")
+down_mirnas_155_lps1 = down_mirnas_155_lps[!duplicated(down_mirnas_155_lps$Row.names),]
+write.csv (down_mirnas_155_lps1,"LPS_miR155.csv")
+```
+
+```{r}
+
+All_trgts_miR_186_5p = Up_regulated_miRNAs[grep("miR-186-5p",Up_regulated_miRNAs$Representative.miRNA),]
+All_signif_targts_miR_186_5p = signif_ign[signif_ign$ensembl_transcript_id%in%All_trgts_miR_186_5p$Transcript.ID,]
+
+All_signi_mirna_Seq_186 = miR186[rownames(miR186)%in%All_signif_targts_miR_186_5p$Row.names,]
+down_mirna_seq_186 = All_signi_mirna_Seq_186[All_signi_mirna_Seq_186$logFC<0,]
+
+down_mirnas_186_lps = merge (signif_ign,down_mirna_seq_186,by.x ="Row.names",by.y = "row.names")
+down_mirnas_186_lps1 = down_mirnas_186_lps[!duplicated(down_mirnas_186_lps$Row.names),] 
+
+write.csv (down_mirnas_186_lps1,"down_mirnas_186_lps.csv")
+
+
+
+```
+```{r}
+All_trgts_miR_125a_3p = Up_regulated_miRNAs[grep("miR-125a-3p",Up_regulated_miRNAs$Representative.miRNA),]
+All_signif_targts_miR_125a_2p = signif_ign[signif_ign$ensembl_transcript_id%in%All_trgts_miR_125a_3p$Transcript.ID,]
+
+All_signif_targts_miR_125a_2p_down = All_signif_targts_miR_125a_2p[All_signif_targts_miR_125a_2p$log2FoldChange < 0,]
+All_signi_mirna_Seq_125 = miR125a[rownames(miR125a)%in%All_signif_targts_miR_125a_2p$Row.names,]
+down_mirna_seq_125a = All_signi_mirna_Seq_125[All_signi_mirna_Seq_125$logFC<0,]
+
+down_mirna_seq_125a_filtered = down_mirna_seq_125a[down_mirna_seq_125a$logFC< -0.5,]
+
+miR125a_targeted_down_cpm = as.data.frame(CPM_Count[rownames(CPM_Count)%in%rownames(down_mirna_seq_125a_filtered),])
+
+
+miR125a_targeted_down_cpm$doner1 = ((miR125a_targeted_down_cpm$t1Negative_Control-miR125a_targeted_down_cpm$t1miR_125a_3p))
+miR125a_targeted_down_cpm$doner2 = ((miR125a_targeted_down_cpm$t2Negative_Control-miR125a_targeted_down_cpm$t2miR_125a_3p))
+miR125a_targeted_down_cpm$doner3 = ((miR125a_targeted_down_cpm$t3Negative_Control-miR125a_targeted_down_cpm$t3miR_125a_3p))
+miR125a_targeted_down_cpm$doner4 = ((miR125a_targeted_down_cpm$t4Negative_Control-miR125a_targeted_down_cpm$t4miR_125a_3p))
+miR125a_targeted_down_cpm$doner5 = ((miR125a_targeted_down_cpm$t5Negative_Control-miR125a_targeted_down_cpm$t5miR_125a_3p))
+miR125a_targeted_down_cpm$doner6 = ((miR125a_targeted_down_cpm$t6Negative_Control-miR125a_targeted_down_cpm$t6miR_125a_3p))
+miR125_donars = subset (miR125a_targeted_down_cpm, select = c ("doner1","doner2","doner3","doner4","doner5","doner6"))
+
+All_signi_mirna_Seq_125_lps = merge (signif_ign,down_mirna_seq_125a,by.x ="Row.names",by.y = "row.names")
+All_signi_mirna_Seq_125_lps1 = All_signi_mirna_Seq_125_lps[!duplicated(All_signi_mirna_Seq_125_lps$Row.names),] 
+
+All_signi_mirna_Seq_125_lps_donors = merge (signif_ign,miR125_donars,by.x ="Row.names",by.y = "row.names")
+
+All_signi_mirna_Seq_125_donors1 = All_signi_mirna_Seq_125_lps_donors[!duplicated(All_signi_mirna_Seq_125_lps_donors$Row.names),] 
+
+All_signi_mirna_Seq_125_donors1_selected = subset (All_signi_mirna_Seq_125_donors1, select = c ("doner1","doner2","doner3","doner4","doner5","doner6","log2FoldChange"))
+
+#write.csv (All_signi_mirna_Seq_125_lps1,"All_signi_mirna_Seq_125_lps.csv")
+library(circlize)
+col_fun = colorRamp2(c(-20, -10, 0, 20), c("white", "blue","green", "white"))
+
+newdata <- counts[order(-a$t1miR_125a_3p, a$t1Negative_Control),]
+
+h1<-Heatmap(
+    as.matrix(All_signi_mirna_Seq_125_donors1_selected, ncol = 7),
+    col = col_fun,
+    border = TRUE , cluster_rows = FALSE, cluster_columns = FALSE, show_column_dend = FALSE, column_km = 1, column_split = seq(1,7),width = unit(6, "cm"),row_names_gp = gpar(fontsize = 8),heatmap_legend_param = list(title = "FC"))
+
+d = All_signi_mirna_Seq_125_donors1_selected
+nolps = d
+nolps$log2FoldChange = NULL
+dd = dd[complete.cases(dd), ]
+
+strip = split(t(miR125_donars), colnames(miR125_donars))
+strip_new <- stack(strip)
+stripchart(values~ind, strip_new, method = "jitter",
+               offset=1/3,vertical = TRUE, pch=19)
+mean = tapply(stack$values, strip_new$ind, mean)
+points(1:ncol(miR125_donars), mean, pch="-", cex=3, col="RED")
+
+```
+
+
+
+```{r}
+library(tidyverse)
+suppressMessages(library(RSQLite))
+
+
+id2sym <- dbGetQuery(dbConnect(SQLite(), "z:/Shared/human_annnotation/csvdb"), "SELECT DISTINCT gene_id, gene_name FROM gene_info")
+
+res_lps_anno = merge(as.data.frame(res_lps),id2sym,by.x = "row.names",by.y = "gene_id")
+
+miR_125a_155 = merge(miR125a_targeted_down, miR155_targeted_down, by = "row.names", 
+                     all = FALSE )
+mir_125a_155_lps = merge (res_lps_anno,miR_125a_155, by = "Row.names")
+
+write.csv (mir_125a_155_lps,"mir_125a_155_lps.csv")
+
+miR_186_155 = merge(miR186_targetted_down, miR155_targeted_down, by = "row.names", 
+                    all = FALSE )
+
+miR_186_155_lps = merge (res_lps_anno,miR_186_155, by = "Row.names")
+
+write.csv (miR_186_155_lps,"miR_186_155_lps.csv")
+
+miR_186_125a = merge(miR125a_targeted_down, miR186_targetted_down, by = "row.names", 
+                     all = FALSE )
+miR_186_125a_lps = merge (res_lps_anno,miR_186_125a, by = "Row.names")
+
+write.csv (miR_186_125a_lps,"miR_186_125a_lps.csv")
+
+all_3_intersect = merge (miR_125a_155,miR186_targetted_down,by.x = "Row.names",by.y= "row.names")
+
+all_3_intersect_lps = merge (all_3_intersect,res_lps_anno, by = "Row.names")
+write.csv (all_3_intersect_lps,"all_3_intersect_lps.csv")
+
+miR186_targetted_down_lps = merge (miR186_targetted_down,res_lps_anno, by.x = "row.names",by.y= "Row.names")
+write.csv (miR186_targetted_down_lps,"miR186_targetted_down_lps.csv")
+
+
+miR125a_targeted_down_lps = merge (miR125a_targeted_down,res_lps_anno, by.x = "row.names",by.y= "Row.names")
+write.csv (miR125a_targeted_down_lps,"miR125a_targeted_down_lps.csv")
+
+
+miR155_targeted_down_lps = merge (miR155_targeted_down,res_lps_anno, by.x = "row.names",by.y= "Row.names")
+write.csv (miR155_targeted_down_lps,"miR155_targeted_down_lps.csv")
+
+
+```
+# Strip chart
+```{r}
+miR125a_targeted_down_cpm_donor1 = miR125a_targeted_down_cpm[,grep("t1",colnames(miR125a_targeted_down_cpm))]
+strip = split(t(miR125a_targeted_down_cpm_donor1), colnames(miR125a_targeted_down_cpm_donor1))
+strip_new <- stack(strip)
+stripchart(values~ind, strip_new, method = "jitter",
+               offset=1/3,vertical = TRUE, pch=19)
+
+```
+```{r}
+mir125a_d2 = subset (miR125a_targeted_down_cpm_donor1, select = c("t1miR_125a_3p","t1Negative_Control"))
+
+p_values <- vector("list", nrow(mir125a_d2))
+
+for(i in seq_along(1: nrow(mir125a_d2))){
+  p_values[i] = wilcox.test(mir125a_d2[i,1],mir125a_d2[i,2], paired = TRUE, alternative = "two.sided", exact = FALSE)$p.value
+
+}
+p_values = data.frame(p_values = sapply(p_values, c))
+
+
+```
+
